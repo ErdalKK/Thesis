@@ -1,0 +1,378 @@
+---
+title: "Thesis"
+author: "Erdal Karacan 474122"
+date: "15-8-2022"
+output: html_document
+---
+
+```{r}
+#install.packages('installr')
+#library(installr)
+#updateR()
+```
+
+# Loading the packages
+```{r}
+library(dplyr)
+library(readr)
+library(stargazer)
+library(ggplot2)
+library(stringi)
+library(MatchIt)
+library(lmtest)
+library(sandwich)
+library(Hmisc)
+library(xtable)
+library(MASS)
+library(olsrr)
+library(lmtest)
+library(plm)
+```
+
+# Loading the Data
+```{r}
+transfermarkt_data <- read_delim("C:/Users/Erdal/OneDrive/Bureaublad/Thesis/transfermarkt_data.csv", 
+    delim = ";", escape_double = FALSE, trim_ws = TRUE)
+
+player_data <- read_delim("C:/Users/Erdal/OneDrive/Bureaublad/Thesis/player_data.csv", 
+    delim = ";", escape_double = FALSE, trim_ws = TRUE)
+
+```
+
+# Unfortunately there were some problems with the encoding of the Player name strings, I tried in many different ways to solve this issue, and do some of it manually
+# However, re-coding over 10k observations for both the datasets (25k total) was not feasible
+# Therefore, I accepted the fact about 2k observations got lost in the merge as I dont expect this will have consequences on the analysis due to the already huge sample size 
+# The code below can be ignored, continue from line #100
+
+```{r}
+#library(data.table)
+#df <- transfermarkt_data
+#fwrite(df,"temp.csv")
+#transfermarkt_data_clean <- fread("temp.csv",encoding = "Latin-1")
+```
+
+```{r}
+#table(Encoding(transfermarkt_data$Player))
+#stri_enc_mark(transfermarkt_data$Player)
+#table(Encoding(transfermarkt_data$Player))
+#table(Encoding(player_data$Player))
+#all(stri_enc_isutf8(player_data$Player))
+```
+
+```{r}
+#transfermarkt_data$Player = stri_trans_general(str = transfermarkt_data$Player, id = 'Latin-ASCII')
+```
+
+# Update: Did not Work
+# Fix the issues in regards to the encoding of special characters in the open datasets (Player Names), code was found and copied from Stackoverflow
+
+```{r}
+# Create the Debugging table from http://www.i18nqa.com/debug/utf8-debug.html
+# UTF-8 characters were interpreted as Windows-1252 and then saved
+# as UTF-8
+
+#create_utf_crosswalk <- function() {
+    #hex_codes <- sprintf("%x", seq(strtoi("0x80"), strtoi("0xFF")))
+    #hex_codes <- hex_codes[!hex_codes %in% c("81", "8d", "8f", "90", "9f")]
+
+    #actual_chars_locale <- vapply(hex_codes, FUN.VALUE = character(1), function(x) {
+    #  parse(text = paste0("'\\x", x, "'"))[[1]]
+    #})
+
+    #actual_chars_utf <- iconv(actual_chars_locale, to = "UTF-8")
+
+    #mangled_chars_utf <- vapply(actual_chars_utf, FUN.VALUE = character(1), 
+     #                           function(x){
+    #                              Encoding(x) <- "Windows-1252"
+    #                              x
+    #                            })
+
+#    out <- actual_chars_utf
+#    names(out) <- mangled_chars_utf
+#    out
+#}
+
+#fixed <- iconv(transfermarkt_data$Player, from = "UTF-8", to = "Windows-1252")
+#fixed2 <- iconv(player_data$Player, from = "UTF-8", to = "Windows-1252")
+
+#Encoding(fixed) <- "UTF-8"
+#Encoding(fixed2) <- "UTF-8"
+
+#fixed
+#fixed2
+```
+
+# Continue:
+# Merge the two files via inner join (on Player and Season) as we want to keep all the variables and throw out the players with missing TM values (and bad encoded player names)
+```{r}
+temp <- merge(player_data, transfermarkt_data, by=c("Player", "Season"))
+```
+
+# As we now only have the players with one or more observations in the dataset, I can manually code the 'race' (0 = White, 1 = NonWhite) of the players through observing their Google & TF Images
+```{r}
+# write.csv(data, 'C:/Users/Erdal/OneDrive/Bureaublad/temp')
+```
+
+# I created a new csv file with the 'race' attribute based on the their appearence in their Google Images, and merge this with the main dataset through inner join
+```{r}
+race_data <- read_delim("C:/Users/Erdal/OneDrive/Bureaublad/Thesis/races_coding.csv", 
+    delim = ";", escape_double = FALSE, locale = locale(encoding = "ISO-8859-1"), 
+    trim_ws = TRUE)
+
+df <- merge(temp, race_data, by=c("Player"))
+```
+# Save final datafile
+```{r}
+write.csv(df, 'C:/Users/Erdal/OneDrive/Bureaublad/final.csv', row.names = FALSE)
+```
+
+# Exploratory Analysis
+
+```{r}
+summary(df)
+```
+# Delete all rows with NA's
+```{r}
+df <- na.omit(df)
+```
+# Change datatypes
+```{r}
+df$race <- as.factor(df$race)
+df$player_foot <- as.factor(df$player_foot)
+df$League <- as.factor(df$League)
+df$Position <- as.factor(df$Position)
+df$Season <- as.factor(df$Season)
+df$Team <- as.factor(df$Team)
+df$Nationality <- as.factor(df$Nationality)
+
+#df$Season <- as.Date(df$Season, "%Y-%Y")
+#df$Season <- format(df$Season, "%d-%m-%Y")
+```
+# Delete players with less than 90 mins
+```{r}
+df <- df[df$Min > 89, ]
+```
+# Fix the performance metric values & TF values
+```{r}
+df$`G+A` <- df$`G+A` / 100
+df$Cmp <- df$Cmp / 10
+df$`Cmp%` <- df$`Cmp%` / 10
+df$KP <- df$KP / 10
+df$Prog <- df$Prog / 10
+df$SCA <- df$SCA / 10
+df$GCA <- df$GCA / 10
+df$`Tkl+Int` <- df$`Tkl+Int` / 10
+df$Clr <- df$Clr / 10
+df$PPM <- df$PPM / 100
+df$market_value <- df$market_value / 100
+```
+# Delete duplicate obsv
+```{r}
+df <- unique(df)
+```
+
+# Create Age^2 
+```{r}
+df$Age_Sq <- '^'(df$Age,2)
+```
+
+# Check Data, min max 25th 75th, boxplots etc to detirmine abnormalities and outliers
+```{r}
+library(psych)
+psych::describe(df)
+summary(df)
+```
+
+```{r}
+library(reshape)
+meltData <- melt(df)
+p <- ggplot(meltData, aes(factor(variable), value))
+p + geom_boxplot() + facet_wrap(~variable, scale="free")
+```
+
+# Scatterplots
+
+```{r}
+par(mfrow=c(1, 5))
+plot(df$market_value, df$Age)
+plot(df$market_value, df$Age_Sq)
+plot(df$market_value, df$Min)
+plot(df$market_value, df$`G+A`)
+plot(df$market_value, df$SoT)
+plot(df$market_value, df$Cmp)
+plot(df$market_value, df$`Cmp%`)
+plot(df$market_value, df$KP)
+plot(df$market_value, df$Prog)
+plot(df$market_value, df$SCA)
+plot(df$market_value, df$GCA)
+plot(df$market_value, df$`Tkl+Int`)
+plot(df$market_value, df$Clr)
+plot(df$market_value, df$PPM)
+```
+
+# Histograms
+```{r}
+ggplot(df, aes(x = df$market_value)) + 
+  geom_histogram(aes(y = ..density..),
+                 colour = 1, fill = "white") +
+  geom_density()
+
+ggplot(df, aes(x = log(df$market_value))) + 
+  geom_histogram(aes(y = ..density..),
+                 colour = 1, fill = "white") +
+  geom_density()
+
+```
+
+
+# Interesting findings (seasonal transfervalue, race transfervalue)
+
+```{r}
+df %>% group_by(League) %>% summarise(average=mean(market_value))
+df %>% group_by(race) %>% summarise(average=mean(market_value))
+df %>% group_by(Season) %>% summarise(average=mean(market_value))
+```
+# Create table for Latex
+```{r}
+TMVstats <- df %>% group_by(League, race) %>% summarise(average=mean(market_value)) 
+TMVstats <- as_data_frame(TMVstats)
+xtable(TMVstats)
+```
+# Log Transform DP
+```{r}
+#df$market_value <- log(df$market_value)
+```
+
+# Make new file only containing numeric values
+```{r}
+num_df <- df[, sapply(df, is.numeric)]
+```
+
+# Check correlation matrix 
+```{r}
+library(ggcorrplot)
+correlation.matrix <- cor(num_df)
+stargazer(correlation.matrix, type = 'text', title = 'Correlation Matrix')
+```
+
+# Summary Statistics
+```{r}
+stargazer(df, type = 'text', title = "Summary Statistics")
+```
+# Linear Regression Models
+# Model 1 only player characteristic
+```{r}
+model1 <- lm(market_value ~ Age + Age_Sq + race + player_foot + League + Position + Season, data = df)
+
+summary(model1)
+```
+# Models violate homoscedasticity assumptions
+# Check residual plots
+```{r}
+plot(model1)
+ols_plot_resid_hist(model1)
+```
+# homoscedasticity & autocorrelation tests
+```{r}
+lmtest::bptest(model1)
+lmtest::dwtest(model1)
+```
+
+# Model 2 add 'basic' performance attributes
+```{r}
+model2 <- lm(market_value ~ Age + Age_Sq + race + player_foot + League + Position + Season + Min + Gls + Ast + CrdY + CrdR , data = df)
+
+summary(model2)
+```
+# Check residual plots
+```{r}
+plot(model2)
+ols_plot_resid_hist(model2)
+```
+# homoscedasticity & autocorrelation tests
+```{r}
+lmtest::bptest(model2)
+lmtest::dwtest(model2)
+```
+
+# Model 3 include all variables
+```{r}
+model3 <- lm(market_value ~ Age + Age_Sq + race + player_foot + League + Position + Season + Min + Gls + Ast + CrdY + CrdR + `G+A` + SoT + Cmp + `Cmp%` + KP + Prog + SCA + GCA + `Tkl+Int` + Clr + PPM , data = df)
+
+summary(model3)
+```
+
+# Check residual plots
+```{r}
+plot(model3)
+ols_plot_resid_hist(model3)
+```
+# homoscedasticity & autocorrelation tests
+```{r}
+lmtest::bptest(model3)
+lmtest::dwtest(model3)
+```
+# All models fail assumption tests 
+# Make table for Latex of all models
+```{r}
+stargazer(model1, model2, model3, type = "latex", single.row = TRUE)
+```
+
+
+
+# Coarsed Exact Matching Algorithm
+
+# 1st
+# Include as much of variables of model 3 to filter all statistical twins (almost exact matching)
+```{r}
+matching1 <- matchit(race ~ Age + League + Position + Season + Min + Gls + Ast + CrdY + CrdR + `G+A` + SoT + Cmp + `Cmp%` + KP + Prog + SCA + GCA + `Tkl+Int` + Clr , data = df, method = 'exact ', estimand = 'ATE')
+summary(matching1, un=FALSE)
+```
+#2nd
+```{r}
+matching2 <- matchit(race ~ Age + Position + Season + Min + Gls + Ast + CrdY + CrdR + `G+A` + SoT + Cmp + `Cmp%` + KP + Prog + SCA + GCA + `Tkl+Int` + Clr , data = df, method = 'cem', estimand = 'ATE')
+summary(matching2, un=FALSE)
+```
+```{r}
+(matched_df2 <- match.data(matching2) %>% arrange(subclass, race))
+```
+# Estimate causal impact - look at ATE (ATM) 
+```{r}
+model2 <- lm(market_value ~ race, data = matched_df2, weights = weights)
+coeftest(model2, vcov. = vcovCL, cluster = ~subclass)
+#cf <- coeftest(model2, vcov. = vcovCL, cluster = ~subclass)
+```
+
+```{r}
+stargazer(cf, type="latex")
+```
+CI
+```{r}
+coefci(model2, cluster = ~subclass)
+```
+
+#3rd
+```{r}
+matching3 <- matchit(race ~ Age + League + Season + Position + Min + Gls + Ast + CrdY + CrdR , data = df, method = 'cem', estimand = 'ATE')
+summary(matching3, un=FALSE)
+```
+
+```{r}
+(matched_df3 <- match.data(matching3) %>% arrange(subclass, race))
+```
+# Estimate causal impact - look at ATE (ATM) 
+```{r}
+model3 <- lm(market_value ~ race, data = matched_df3, weights = weights)
+coeftest(model3, vcov. = vcovCL, cluster = ~subclass)
+#cf2 <- coeftest(model3, vcov. = vcovCL, cluster = ~subclass)
+```
+
+```{r}
+stargazer(cf2, type="latex")
+```
+CI
+```{r}
+coefci(model3, cluster = ~subclass)
+```
+
+
